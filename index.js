@@ -1,10 +1,12 @@
+require("dotenv").config();
+
 const express = require("express");
 const bodyParser = require("body-parser");
-const mysql = require("mysql2");
+const { Pool } = require("pg");
 const path = require("path");
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Middleware para ler formulários (POST)
 app.use(bodyParser.urlencoded({ extended: true }));
@@ -12,26 +14,23 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // Servir arquivos estáticos (HTML, CSS, JS da pasta "public")
 app.use(express.static(path.join(__dirname, "public")));
 
-// Conexão com o banco de dados MySQL
-const db = mysql.createConnection({
-    host: "localhost",
-    user: "root",       // seu usuário MySQL
-    password: "8945",   // sua senha MySQL
-    database: "telaloginsimples"
+// Conexão com o banco de dados PostgreSQL (dados lidos do arquivo .env)
+const pool = new Pool({
+    host: process.env.DB_HOST || "localhost",
+    port: Number(process.env.DB_PORT) || 5432,
+    user: process.env.DB_USER || "postgres",
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME || "bdtelaloginsimples"
 });
 
 // Testar conexão
-db.connect((err) => {
-    if (err) {
-        console.error("❌ Erro ao conectar ao banco de dados:", err);
-    } else {
-        console.log("✅ Conectado ao banco de dados MySQL!");
-    }
-});
+pool.query("SELECT 1")
+    .then(() => console.log("✅ Conectado ao banco de dados PostgreSQL!"))
+    .catch((err) => console.error("❌ Erro ao conectar ao banco de dados:", err.message));
 
 // ---------------- ROTAS ----------------
 
-// Página inicial → redireciona para login
+// Página inicial → login
 app.get("/", (req, res) => {
     res.sendFile(path.join(__dirname, "public", "login.html"));
 });
@@ -52,35 +51,33 @@ app.get("/sucessocadastro", (req, res) => {
 });
 
 // ---------------- ROTA DE LOGIN ----------------
-app.post("/login", (req, res) => {
+app.post("/login", async (req, res) => {
     const { usuario, senha } = req.body;
 
     if (!usuario || !senha) {
         return res.redirect("/login?erro=Preencha todos os campos!");
     }
 
-    const query = "SELECT * FROM usuarios WHERE usuario = ? AND senha = ?";
-    db.query(query, [usuario, senha], (err, results) => {
-        if (err) {
-            console.error("Erro ao consultar banco:", err);
-            return res.redirect("/login?erro=Erro interno no servidor.");
-        }
+    try {
+        const query = "SELECT id FROM usuarios WHERE usuario = $1 AND senha = $2";
+        const result = await pool.query(query, [usuario, senha]);
 
-        if (results.length > 0) {
-            // Login OK
+        if (result.rows.length > 0) {
             res.send(`
                 <h2>✅ Login bem-sucedido!</h2>
                 <p>Bem-vindo, <strong>${usuario}</strong>!</p>
             `);
         } else {
-            // Login inválido
             res.redirect("/login?erro=Usuário ou senha incorretos!");
         }
-    });
+    } catch (err) {
+        console.error("Erro ao consultar banco:", err);
+        res.redirect("/login?erro=Erro interno no servidor.");
+    }
 });
 
 // ---------------- ROTA DE CADASTRO ----------------
-app.post("/cadastro", (req, res) => {
+app.post("/cadastro", async (req, res) => {
     const { usuario, senha, confirmarSenha } = req.body;
 
     if (!usuario || !senha || !confirmarSenha) {
@@ -96,15 +93,12 @@ app.post("/cadastro", (req, res) => {
         `);
     }
 
-    // Verifica se o usuário já existe
-    const checkUser = "SELECT * FROM usuarios WHERE usuario = ?";
-    db.query(checkUser, [usuario], (err, results) => {
-        if (err) {
-            console.error("Erro ao verificar usuário:", err);
-            return res.status(500).send("Erro interno no servidor.");
-        }
+    try {
+        // Verifica se o usuário já existe
+        const checkUser = "SELECT id FROM usuarios WHERE usuario = $1";
+        const checkResult = await pool.query(checkUser, [usuario]);
 
-        if (results.length > 0) {
+        if (checkResult.rows.length > 0) {
             return res.send(`
                 <script>
                     alert("⚠️ Usuário já cadastrado!");
@@ -113,18 +107,15 @@ app.post("/cadastro", (req, res) => {
             `);
         }
 
-        // Se não existir, cria o novo usuário
-        const insertUser = "INSERT INTO usuarios (usuario, senha) VALUES (?, ?)";
-        db.query(insertUser, [usuario, senha], (err) => {
-            if (err) {
-                console.error("Erro ao cadastrar usuário:", err);
-                return res.status(500).send("Erro ao salvar no banco de dados.");
-            }
+        // Cria o novo usuário
+        const insertUser = "INSERT INTO usuarios (usuario, senha) VALUES ($1, $2)";
+        await pool.query(insertUser, [usuario, senha]);
 
-            // Redireciona para a página de sucesso
-            res.redirect("/sucessocadastro");
-        });
-    });
+        res.redirect("/sucessocadastro");
+    } catch (err) {
+        console.error("Erro ao cadastrar usuário:", err);
+        res.status(500).send("Erro ao salvar no banco de dados.");
+    }
 });
 
 // ---------------- INICIAR SERVIDOR ----------------
