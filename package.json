@@ -7,7 +7,13 @@
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
-  "keywords": ["nodejs", "express", "postgresql", "login", "cadastro"],
+  "keywords": [
+    "nodejs",
+    "express",
+    "postgresql",
+    "login",
+    "cadastro"
+  ],
   "author": "Yuri Da Silva Cardoso",
   "license": "ISC",
   "dependencies": {
